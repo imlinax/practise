@@ -1,9 +1,11 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+
+#include <unistd.h>
 
 #define PORT 69
 #define RRQ 1
@@ -39,7 +41,7 @@ int handle_RRQ(char *in_buf,char *out_buf)
 {
 	char file_name[512] = {0};
 	char mode[512] = {0};
-	char *pIndex = &in_buf[1];
+	char *pIndex = &in_buf[2];
 	char *pFile = file_name;
 	char *pMode = mode;
 	while(*pIndex != '\0')
@@ -52,14 +54,18 @@ int handle_RRQ(char *in_buf,char *out_buf)
 		*pMode++ = *pIndex++;
 	}
 
-	printf("RRQ file_name: %s\n",file_name);
+	printf("RRQ file_name: %s,name length = %d\n",file_name,(int)strlen(file_name));
 	printf("RRQ mode: %s\n",mode);
+
+	//FILE *file = fopen(file_name,"r");
 
 	FILE *file = fopen(file_name,"r");
 	if(NULL == file)
 	{
 		// TODO:send error	
-		printf("open %s error,cwd = %s\n",file_name,get_current_dir_name());
+        char *path = get_current_dir_name();
+		printf("open %s error,cwd = %s\n",file_name,path);
+        free(path);
 		exit(0);
 	}
 
