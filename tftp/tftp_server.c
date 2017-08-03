@@ -17,6 +17,7 @@
 
 #define BUF_SIZE 600
 char send_buf[BUF_SIZE];
+FILE * file = NULL;
 void send_error(int error_code,char *error_msg)
 {
 	
@@ -59,7 +60,7 @@ int handle_RRQ(char *in_buf,char *out_buf)
 
 	//FILE *file = fopen(file_name,"r");
 
-	FILE *file = fopen(file_name,"r");
+	file = fopen(file_name,"r");
 	if(NULL == file)
 	{
 		// TODO:send error	
@@ -70,9 +71,8 @@ int handle_RRQ(char *in_buf,char *out_buf)
 	}
 
 	char buf[512] = {0};
-	int read_len = fread(buf, 512, 1, file);
-	int len = make_data(out_buf, 0, buf, read_len);
-	fclose(file);
+	int read_len = fread(buf, 1, 512, file);
+	int len = make_data(out_buf, 1, buf, read_len);
 	
 	return len;
 }
@@ -82,6 +82,29 @@ int handle_WRQ(char *in_buf,char *out_buf)
 	printf("WRQ: %s\n",&in_buf[1]);
 	int index = 0;
 	return index;
+}
+int handle_ACK(char *in_buf,char *out_buf)
+{
+	if(!file)
+	{
+		return 0;
+	}
+	short int block = 0;
+	block = ntohs(*(short int*)(in_buf+2));
+	fseek(file,512*block,SEEK_SET);
+
+	char buf[512] = {0};
+	int read_len = fread(buf, 1, 512, file);
+	if( read_len < 512)
+	{
+		printf("fclose\n");
+		fclose(file);
+		file = NULL;
+	}
+
+	int len = make_data(out_buf, block+1, buf, read_len);
+	
+	return len;
 }
 int handle_req(char *in_buf,char *out_buf)
 {
@@ -104,6 +127,7 @@ int handle_req(char *in_buf,char *out_buf)
 	case ACK:
 		{
 			short seq=htons(*(unsigned short *)&in_buf[1]);
+			index = handle_ACK(in_buf,out_buf);
 			printf("ACK: %d\n",seq);
 			break;
 		}
@@ -159,7 +183,10 @@ int main(int argc,char** argv)
         }
         //printf("recv msg: %s",buf);
 		int out_len = handle_req(in_buf,out_buf);
-        sendto(serverfd,out_buf,out_len,0,(struct sockaddr*)&cliaddr,len);
+		if(out_len)
+		{
+        	sendto(serverfd,out_buf,out_len,0,(struct sockaddr*)&cliaddr,len);
+		}
     }
 
     return 0;
