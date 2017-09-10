@@ -1,7 +1,7 @@
 extern "C" {
 #include "list.h"
 }
-#include <gtest/gtest.h>
+#include "gtest/gtest.h"
 
 TEST(list_test, create_session_list) 
 {
