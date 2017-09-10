@@ -3,9 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include <netinet/in.h>
 
 #include <unistd.h>
+#include "session.h"
 
 #define PORT 69
 #define RRQ 1
@@ -16,8 +18,15 @@
 
 
 #define BUF_SIZE 600
+#define FILE_NAME_BUF_SIZE 512
+
+
+SESSION *handle_RRQ(struct sockaddr* addr, int addr_len,char *in_buf);
+int handle_WRQ(char *in_buf);
+
 char send_buf[BUF_SIZE];
 FILE * file = NULL;
+
 void send_error(int error_code,char *error_msg)
 {
 	
@@ -38,7 +47,43 @@ int make_data(char *dst_buf,short int block,char *src_data_buf,int data_len)
 
 	return index;
 }
-int handle_RRQ(char *in_buf,char *out_buf)
+
+SESSION* create_new_session(FILE *file,struct sockaddr* addr, int addr_len)
+{
+	SESSION *sess = malloc(sizeof(SESSION));
+	sess->sock_fd = socket(AF_INET,SOCK_DGRAM,0);
+	sess->pFile = file;
+	sess->cli_addr = malloc(addr_len);
+	memcpy(sess->cli_addr, addr, addr_len);
+	sess->cli_addr_len = addr_len;
+	return sess;
+}
+void free_session(SESSION *sess)
+{
+	if(sess)
+	{
+		free(sess->cli_addr);
+		free(sess);
+	}
+}
+SESSION *handle_new_connection(struct sockaddr* addr, int addr_len, char *in_buf)
+{
+	int index = 0;
+	SESSION* sess =NULL; 
+	unsigned short req = ntohs(*(unsigned short *)&in_buf[0]);
+	switch(req)
+	{
+	case RRQ:
+		sess = handle_RRQ(addr,addr_len, in_buf);	
+	case WRQ:
+		handle_WRQ(in_buf);
+		break;
+	default:
+		printf("warning: can't handle this req: %d\n",req);
+	}
+	return sess;
+}
+SESSION *handle_RRQ(struct sockaddr* addr, int addr_len,char *in_buf)
 {
 	char file_name[512] = {0};
 	char mode[512] = {0};
@@ -67,21 +112,23 @@ int handle_RRQ(char *in_buf,char *out_buf)
         char *path = get_current_dir_name();
 		printf("open %s error,cwd = %s\n",file_name,path);
         free(path);
-		exit(0);
+		return NULL;
 	}
 
 	char buf[512] = {0};
+	char out_buf[512] = {0};
 	int read_len = fread(buf, 1, 512, file);
 	int len = make_data(out_buf, 1, buf, read_len);
 	
-	return len;
+	SESSION* sess = create_new_session(file, addr, addr_len);
+	
+	sendto(sess->sock_fd,out_buf,len,0,sess->cli_addr,sess->cli_addr_len);
+	return sess;
 }
 
-int handle_WRQ(char *in_buf,char *out_buf)
+int handle_WRQ(char *in_buf)
 {
-	printf("WRQ: %s\n",&in_buf[1]);
-	int index = 0;
-	return index;
+	return 0;
 }
 int handle_ACK(char *in_buf,char *out_buf)
 {
@@ -106,18 +153,12 @@ int handle_ACK(char *in_buf,char *out_buf)
 	
 	return len;
 }
-int handle_req(char *in_buf,char *out_buf)
+int handle_req(struct sockaddr* addr,int addr_len, char *in_buf,char *out_buf)
 {
 	int index = 0;
 	unsigned short req = ntohs(*(unsigned short *)&in_buf[0]);
 	switch(req)
 	{
-	case RRQ:
-		index = handle_RRQ(in_buf,out_buf);	
-		break;
-	case WRQ:
-		index = handle_WRQ(in_buf,out_buf);
-		break;
 	case DATA:
 		{
 			short int seq=htons(*(unsigned short int*)&in_buf[1]);
@@ -144,6 +185,7 @@ int handle_req(char *in_buf,char *out_buf)
 	return index;
 
 }
+
 int main(int argc,char** argv)
 {
     struct sockaddr_in serveraddr;
@@ -172,22 +214,57 @@ int main(int argc,char** argv)
     socklen_t len = sizeof(cliaddr);
     char in_buf[512];
     char out_buf[600];
-    while(1)
-    {
-        memset(in_buf,0,sizeof(in_buf));
-        memset(out_buf,0,sizeof(out_buf));
-        int errno = recvfrom(serverfd,in_buf,sizeof(in_buf),0,(struct sockaddr*)&cliaddr,&len);
-        if(errno <= 0)
-        {
-             perror("recvfrom error");
-        }
-        //printf("recv msg: %s",buf);
-		int out_len = handle_req(in_buf,out_buf);
-		if(out_len)
+
+	int epollfd = epoll_create1(0);
+	if (epollfd == -1) 
+	{
+		perror("epoll_create1");
+		exit(EXIT_FAILURE);
+	}
+
+	#define MAX_EVENTS 10
+	struct epoll_event ev,events[MAX_EVENTS];
+	ev.events = EPOLLIN;
+	ev.data.fd = serverfd;
+	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, serverfd, &ev))
+	{
+		perror("epoll_ctl: server fd");	
+		exit(EXIT_FAILURE);
+	}
+
+	for (;;)
+	{
+		int nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);	
+		if (nfds == -1)
 		{
-        	sendto(serverfd,out_buf,out_len,0,(struct sockaddr*)&cliaddr,len);
+			perror("epoll_wait");
+			exit(EXIT_FAILURE);
 		}
-    }
+
+		for (int n = 0; n < nfds; ++n)
+		{
+			if (events[n].data.fd == serverfd)	
+			{
+				int errno = recvfrom(serverfd,in_buf,sizeof(in_buf),0,(struct sockaddr*)&cliaddr,&len);
+				SESSION *sess = handle_new_connection((struct sockaddr*)&cliaddr, len, in_buf);
+				if(sess)
+				{
+					ev.events = EPOLLIN;
+					ev.data.fd = sess->sock_fd;
+					if (epoll_ctl(epollfd, EPOLL_CTL_ADD, serverfd, &ev))
+					{
+						perror("epoll_ctl: server fd");	
+						exit(EXIT_FAILURE);
+					}
+				}
+			}
+			else
+			{
+					
+			}
+		}
+	}
+
 
     return 0;
 }
