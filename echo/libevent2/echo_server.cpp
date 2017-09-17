@@ -36,17 +36,6 @@ void listener_cb(struct evconnlistener * evlistener, evutil_socket_t fd, struct 
 
 int main(int argc, char** argv)
 {
-
-    // supported methods
-    auto methods = event_get_supported_methods();
-    std::cout << "supported method:" << std::endl;
-    int i = 0;
-    for(int i = 0; methods[i] != NULL; i++)
-    {
-        std::cout << methods[i] << std::endl;
-    }
-    std::cout << std::endl;
-
     // event2 init
     struct event_base *base;
     base = event_base_new();

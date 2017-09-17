@@ -1,6 +1,9 @@
 #include <iostream>
 #include <stdlib.h>
 #include <string.h>
+#include <vector>
+#include <memory>
+#include <thread>
 
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
@@ -44,22 +47,6 @@ void event_cb(struct bufferevent *bev,short event, void* args)
 
    // bufferevent_free(bev);
 }
-void listener_cb(struct evconnlistener * evlistener, evutil_socket_t fd, struct sockaddr * addr, int socklen, void *user_data)
-{
-    std::cout << "accept" << std::endl;
-    struct event_base *base = static_cast<struct event_base*>(user_data);
-    struct bufferevent *bev;
-
-    bev = bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE);
-    if (!bev)
-    {
-        std::cerr << "Error constructing bufferevent!" << std::endl;
-    }
-
-    bufferevent_setcb(bev, read_cb, NULL, NULL, NULL);
-    bufferevent_enable(bev, EV_READ | EV_PERSIST);
-
-}
 
 class echo_client
 {
@@ -83,7 +70,8 @@ private:
     bufferevent *bev_;
 
 };
-int main(int argc, char** argv)
+
+void start_thread()
 {
     // event2 init
     struct event_base *base;
@@ -91,18 +79,35 @@ int main(int argc, char** argv)
     if (!base) 
     {
         std::cerr << "Could not initialize libevent!" << std::endl;
-        return 1;
+        return;
     }
 
     // event2 connect 
-    echo_client client(base, "127.0.0.1", PORT);
-    client.start();
+    std::vector<std::shared_ptr<echo_client>> client_vec;
+    for (int i = 0; i < 10; i++)
+    {
+        std::shared_ptr<echo_client> client_ptr(new echo_client(base, "127.0.0.1", PORT));
+        client_vec.push_back(client_ptr);
+    }
+
+    for (auto client : client_vec)
+    {
+        client->start();
+    }
 
     event_base_dispatch(base);
 
     // free 
     event_base_free(base);
 
+}
+
+int main(int argc, char** argv)
+{
+    std::thread thread1(start_thread);
+    std::thread thread2(start_thread);
+    thread1.join();
+    thread2.join();
     std::cout << "Done" << std::endl;
     return 0;
 }
