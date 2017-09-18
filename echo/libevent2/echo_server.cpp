@@ -12,9 +12,26 @@
 
 
 const int PORT = 7890;
-void listener_cb(struct evconnlistener * evlistener, evutil_socket_t socket, struct sockaddr * addr, int socklen, void *ptr)
+void read_cb(struct bufferevent *bev, void* ctx)
+{
+    struct evbuffer *input = bufferevent_get_input(bev);
+    bufferevent_write_buffer(bev,input);
+}
+void listener_cb(struct evconnlistener * evlistener, evutil_socket_t fd, struct sockaddr * addr, int socklen, void *user_data)
 {
     std::cout << "accept" << std::endl;
+    struct event_base *base = static_cast<struct event_base*>(user_data);
+    struct bufferevent *bev;
+
+    bev = bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE);
+    if (!bev)
+    {
+        std::cerr << "Error constructing bufferevent!" << std::endl;
+    }
+
+    bufferevent_setcb(bev, read_cb, NULL, NULL, NULL);
+    bufferevent_enable(bev, EV_READ);
+
 }
 
 int main(int argc, char** argv)
