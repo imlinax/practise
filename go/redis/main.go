@@ -17,9 +17,14 @@ func main() {
 		return
 	}
 	defer c.Close()
-	for i := 0; i < 1000*1000; i++ {
+	for i := 0; i < 1000*1000*100; i++ {
 		keyStr := RandStringRunes(60)
 		v, err := c.Do("SET", keyStr, keyStr)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		v, err = c.Do("DEL", keyStr)
 		if err != nil {
 			fmt.Println(err)
 			return
